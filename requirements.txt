@@ -1,0 +1,5 @@
+anthropic
+python-dotenv
+nest_asyncio
+mcp
+arxiv
