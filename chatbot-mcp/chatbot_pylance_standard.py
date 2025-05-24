@@ -3,7 +3,7 @@ from anthropic import Anthropic
 from anthropic.types import MessageParam, ToolUnionParam, Message, ToolParam
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
-from typing import Iterable, List, Optional
+from typing import Any, Iterable, List, Optional, cast
 import asyncio
 import nest_asyncio
 
@@ -21,7 +21,7 @@ class MCP_ChatBot:
 
     async def process_query(self, query):
         messages : Iterable[MessageParam] = [{'role':'user', 'content':query}]
-        response = self.anthropic.messages.create(max_tokens = 2024,
+        response: Message = self.anthropic.messages.create(max_tokens = 2024,
                                       model = 'claude-3-7-sonnet-20250219', 
                                       tools = self.available_tools, # tools exposed to the LLM
                                       messages = messages)
@@ -38,7 +38,7 @@ class MCP_ChatBot:
                     assistant_content.append(content)
                     messages.append({'role':'assistant', 'content':assistant_content})
                     tool_id = content.id
-                    tool_args = content.input
+                    tool_args  = content.input
                     tool_name = content.name
     
                     print(f"Calling tool {tool_name} with args {tool_args}")
@@ -46,16 +46,18 @@ class MCP_ChatBot:
                     # Call a tool
                     #result = execute_tool(tool_name, tool_args): not anymore needed
                     # tool invocation through the client session
-                    result = await self.session.call_tool(tool_name, arguments=tool_args) # type: ignore
-                    messages.append({"role": "user", 
-                                      "content": [
-                                          {
-                                              "type": "tool_result",
-                                              "tool_use_id":tool_id,
-                                              "content": result.content
-                                          }
-                                      ]
-                                    })
+                    if (session := self.session):
+                        result = await self.session.call_tool(tool_name, arguments=tool_args) # type: ignore
+                        messages.append({"role": "user", 
+                                          "content": [
+                                              {
+                                                  "type": "tool_result",
+                                                  "tool_use_id":tool_id,
+                                                  "content": result.content
+                                            }
+                                        ]
+                                    }   )
+                        
                     response = self.anthropic.messages.create(max_tokens = 2024,
                                       model = 'claude-3-7-sonnet-20250219', 
                                       tools = self.available_tools,
@@ -88,8 +90,8 @@ class MCP_ChatBot:
     async def connect_to_server_and_run(self):
         # Create server parameters for stdio connection
         server_params = StdioServerParameters(
-            command="python",  # Executable
-            args=["mcp_project/research_server.py"],  # Optional command line arguments
+            command="uv",  # Executable
+            args=["run", "mcp_project/research_server.py"],  # Optional command line arguments
             env=None,  # Optional environment variables
         )
         async with stdio_client(server_params) as (read, write):
@@ -99,16 +101,16 @@ class MCP_ChatBot:
                 await session.initialize()
     
                 # List available tools
-                response = await session.list_tools()
+                response: types.ListToolsResult = await session.list_tools()
                 
                 tools = response.tools
                 print("\nConnected to server with tools:", [tool.name for tool in tools])
                 
-                self.available_tools = [{ # type: ignore
+                self.available_tools = cast(Iterable[ToolParam],[{
                     "name": tool.name,
                     "description": tool.description,
                     "input_schema": tool.inputSchema
-                } for tool in response.tools]
+                } for tool in response.tools])
     
                 await self.chat_loop()
 
